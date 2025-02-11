@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
 import { auth } from "@clerk/nextjs/server";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 cloudinary.config({
   cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
@@ -12,6 +15,8 @@ interface CloudinaryUploadResult {
   public_id: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
+  duration?: number;
+  bytes: number;
 }
 
 export async function POST(request: NextRequest) {
@@ -21,8 +26,22 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    if (
+      !process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ||
+      !process.env.CLOUDINARY_API_KEY ||
+      !process.env.CLOUDINARY_API_SECRET
+    ) {
+      return NextResponse.json(
+        { error: "Cloudinary credentials not found" },
+        { status: 500 }
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const title = formData.get("title") as string;
+    const description = formData.get("description") as string;
+    const originalSize = formData.get("originalSize") as string;
 
     if (!file) {
       return NextResponse.json("No file found");
@@ -47,12 +66,25 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    return NextResponse.json({ publicId: result.public_id }, { status: 200 });
+    const video = await prisma.video.create({
+        data: {
+            title,
+            description,
+            publicId: result.public_id,
+            originalSize: originalSize,
+            compressedSize: String(result.bytes),
+            duration: result.duration || 0,
+        },
+        });
+
+    return NextResponse.json(video, { status: 200 });
   } catch (error) {
     if (error instanceof Error) {
       console.log(error.message);
       return NextResponse.json(error.message, { status: 500 });
     }
-    return NextResponse.json("error uploading image", { status: 500 });
+    return NextResponse.json("error uploading video", { status: 500 });
+  }finally {
+    await prisma.$disconnect();
   }
 }
